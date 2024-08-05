@@ -1,15 +1,6 @@
 # Hierarchical Spatial Proximity Reasoning for Vision-and-Language Navigation
 
-Most Vision-and-Language Navigation (VLN) algorithms tend to make deci-sion errors, primarily due to a lack of visual common sense 
-and insufficient reasoning capabilities. To address this issue, this paper proposes a Hierar-chical Spatial Proximity Reasoning (HSPR) model. 
-Firstly, we design a Sce-ne Understanding Auxiliary Task (SUAT) to assist the agent in constructing a knowledge base of hierarchical spatial proximity 
-for reasoning navigation. Specifically, this task utilizes panoramic views and object features to identify regions in the navigation environment 
-and uncover the adjacency relation-ships between regions, objects, and region-object pairs. Secondly, we dynam-ically construct a semantic topological map 
-through agent-environment in-teractions and propose a Multi-step Reasoning Navigation Algorithm (MRNA) based on the map. This algorithm continuously 
-plans various feasi-ble paths from one region to another, utilizing the constructed proximity knowledge base, enabling more efficient exploration. 
-Additionally, we intro-duce a Proximity Adaptive Attention Module (PAAM) and Residual Fusion Method (RFM) to enable the model to obtain more accurate 
-navigation deci-sion confidence. Finally, we conduct experiments on publicly available da-tasets including REVERIE, SOON, R2R, and R4R to validate the 
-effective-ness of the proposed approach.
+Most Vision-and-Language Navigation (VLN) algorithms are prone to make decision errors due to a lack of visual common sense and insufficient reasoning capabilities. To address this issue, we propose a Hierarchical Spatial Proximity Reasoning (HSPR) method. Firstly, we introduce a scene understanding auxiliary task to help the agent build a knowledge base of hierarchical spatial proximity. This task utilizes panoramic views and object features to identify regions and uncover the adjacency relationships including those between regions, between objects, and between region-object pairs. Secondly, we propose a multi-step reasoning navigation algorithm based on hierarchical spatial proximity knowledge base, which continuously plans feasible paths to enhance exploration efficiency. Thirdly, we introduce a residual fusion method to improve navigation decision accuracy. Finally, we validate our approach with experiments on publicly available datasets including REVERIE, SOON, R2R, and R4R.
 
 ![framework](files/fig2.png)
 
