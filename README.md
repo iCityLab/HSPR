@@ -11,7 +11,7 @@ Additionally, we intro-duce a Proximity Adaptive Attention Module (PAAM) and Res
 navigation deci-sion confidence. Finally, we conduct experiments on publicly available da-tasets including REVERIE, SOON, R2R, and R4R to validate the 
 effective-ness of the proposed approach.
 
-![framework](files/teaser.png)
+![framework](files/fig_2.png)
 
 ## Requirements
 
