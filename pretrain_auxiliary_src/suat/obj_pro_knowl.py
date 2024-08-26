@@ -1,13 +1,13 @@
-
 import itertools
 import json
 import numpy as np
+import torch
 from .calcu_prox import calculated_obj_proximity
 np.set_printoptions(threshold=np.inf)
 
 
 def object_counting(obj_lists):
-    count_matric = np.zeros((1600, 1600))
+    count_matric = torch.zeros(1600, 1600)
     for lst in obj_lists:
         for comb in itertools.combinations(lst[1:], 2):
             x, y = comb
@@ -27,7 +27,7 @@ def construct_obj_prox():
     for sub_view in pano:
         object_list.add(tuple(pano[sub_view]['labels']))
     object_list = [list(lst) for lst in object_list]
-    obj_count_matrix = object_counting(object_list).astype(int)
+    obj_count_matrix = object_counting(object_list)
     obj_pro = calculated_obj_proximity(obj_count_matrix)
     # print(obj_count_matrix[:][0], obj_count_matrix.shape)
 
