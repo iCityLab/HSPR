@@ -1,8 +1,6 @@
-
-import math
-
 import numpy as np
 import torch
+from sklearn.preprocessing import MinMaxScaler
 
 
 def single_non_zero_to_one(lst):
@@ -14,71 +12,41 @@ def single_non_zero_to_one(lst):
         return lst
 
 
-def activate_function(input, mid, max, top):
-    output = []
-    for x in input:
-        if x == 0:
-            output.append(0)
-        elif x < mid:
-            y = - pow(x, 2) / (2 * pow(mid, 2)) + x / mid
-            output.append(y)
-        elif mid <= x <= max:
-            y = pow(x, 2) / (2 * pow((mid - top), 2)) - (mid * x) / pow((mid - top), 2) + pow(mid, 2) / (
-                    2 * pow((mid - top), 2)) + 0.5
-            output.append(y)
-        else:
-            y = float(torch.arctan(torch.tensor(x, dtype=torch.float)) - (math.pi / 2 - 0.92))
-            output.append(y)
-    output = single_non_zero_to_one(output)
-    return output
 
 
 def calculated_reg_proximity(c_matrix):
-    # print(c_matrix)
-    p_matrix = []
-    for i, count_list in enumerate(c_matrix):
-        all_list = torch.clone(count_list)
-        count_list = count_list.masked_select(count_list > 0)
-        while len(count_list) <= 4:
-            count_list = torch.cat([count_list, torch.tensor([0])], 0)  # fill
-        count_list = count_list.tolist()
-        j = 0
-        while j < 2:
-            count_list.remove(max(count_list))
-            count_list.remove(min(count_list))
-            j += 1
+    percentile_95 = torch.quantile(c_matrix, 0.95, dim=1)
 
-        mid_count = np.mean(count_list)
-        max_count = max(count_list)
-        top_count = max_count + mid_count
-        prob_list = activate_function(all_list.tolist(), mid_count, max_count, top_count)
-        p_matrix.append(prob_list)
-    conn_pro = np.around(np.array(p_matrix), 4) + np.eye(31, dtype=np.float32)
-    conn_pro = conn_pro.T
-    # conn_pro_flip = np.flip(conn_pro, axis=(0, 1))
-    # for i, row in enumerate(conn_pro_flip):
-    #     conn_pro_flip[:, i] = row
-    # conn_pro = np.flip(conn_pro_flip, axis=(0, 1))
+    # Replace outliers
+    # Use broadcasting to ensure the shape of percentile_95 matches the count
+    winsorized_data = torch.where(c_matrix > percentile_95.unsqueeze(1), percentile_95.unsqueeze(1), c_matrix)
+
+    winsorized_data_np = winsorized_data.numpy()
+
+    # Create MinMaxScaler object, set specific range
+    scaler = MinMaxScaler(feature_range=(0, 0.95))
+    normalized_data = []
+    for line in winsorized_data_np:
+        pro = scaler.fit_transform(line.reshape(-1, 1)).flatten()
+        normalized_data.append(pro)
+    normalized_data = np.vstack(normalized_data)
+    conn_pro = np.around(np.array(normalized_data), 4) + np.eye(31, dtype=np.float32)
     return conn_pro
 
 
 def calculated_obj_proximity(o_matrix):
-    p_matrix = []
-    for i, count_list in enumerate(o_matrix):
-        all_list = np.copy(count_list)
-        count_list = count_list[count_list > 0]
-        while len(count_list) <= 20:
-            count_list = np.append(count_list, 0)
-        count_list = count_list.tolist()
-        j = 0
-        while j < 10:
-            count_list.remove(max(count_list))
-            count_list.remove(min(count_list))
-            j += 1
-        mid_count = np.mean(count_list)
-        max_count = max(count_list)
-        top_count = max_count + mid_count
-        prob_list = activate_function(all_list.tolist(), mid_count, max_count, top_count)
-        p_matrix.append(prob_list)
-    conn_pro = np.around(np.array(p_matrix), 4) + np.eye(1600, dtype=np.float32)
+    percentile_95 = torch.quantile(o_matrix, 0.95, dim=1)
+
+    winsorized_data = torch.where(o_matrix > percentile_95.unsqueeze(1), percentile_95.unsqueeze(1), o_matrix)
+
+    winsorized_data_np = winsorized_data.numpy()
+
+    scaler = MinMaxScaler(feature_range=(0, 0.95))
+    normalized_data = []
+    for line in winsorized_data_np:
+        pro = scaler.fit_transform(line.reshape(-1, 1)).flatten()
+        normalized_data.append(pro)
+    normalized_data = np.vstack(normalized_data)
+    conn_pro = np.around(np.array(normalized_data), 4) + np.eye(1600, dtype=np.float32)
+    # print(conn_pro.shape)
     return conn_pro
