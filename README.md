@@ -1,8 +1,8 @@
 # Hierarchical Spatial Proximity Reasoning for Vision-and-Language Navigation
 
-Most Vision-and-Language Navigation (VLN) algorithms are prone to make decision errors due to a lack of visual common sense and insufficient reasoning capabilities. To address this issue, we propose a Hierarchical Spatial Proximity Reasoning (HSPR) method. Firstly, we introduce a scene understanding auxiliary task to help the agent build a knowledge base of hierarchical spatial proximity. This task utilizes panoramic views and object features to identify regions and uncover the adjacency relationships including those between regions, between objects, and between region-object pairs. Secondly, we propose a multi-step reasoning navigation algorithm based on hierarchical spatial proximity knowledge base, which continuously plans feasible paths to enhance exploration efficiency. Thirdly, we introduce a residual fusion method to improve navigation decision accuracy. Finally, we validate our approach with experiments on publicly available datasets including REVERIE, SOON, R2R, and R4R.
+Most Vision-and-Language Navigation (VLN) algorithms are prone to making decision due to a lack of visual common sense and insufficient reasoning capabilities. To address this issue, we propose a Hierarchical Spatial Proximity Reasoning (HSPR) method. First, we introduce a scene understanding auxiliary task to help the agent build a knowledge base of hierarchical spatial proximity. This task utilizes panoramic views and object features to identify types of nodes and uncover the adjacency relationships between nodes, objects, and between nodes and objects. Second, we propose a multi-step reasoning navigation algorithm based on hierarchical spatial proximity knowledge base, which continuously plans feasible paths to enhance exploration efficiency. Third, we introduce a residual fusion method to improve navigation decision accuracy. Finally, we validate our approach with experiments on publicly available datasets including REVERIE, SOON, R2R, and R4R.
 
-![framework](files/fig2.png)
+![framework](files/figure2.png)
 
 ## Requirements
 
