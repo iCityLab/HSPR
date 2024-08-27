@@ -1,11 +1,20 @@
+import json
+import os
 import sys
 import numpy as np
+import random
 import math
+import time
+from collections import defaultdict
+import line_profiler
 
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
+from torch import optim
+import torch.nn.functional as F
 
+from utils.distributed import is_default_gpu
 from utils.ops import pad_tensors, gen_seq_masks, try_cuda
 from torch.nn.utils.rnn import pad_sequence
 
@@ -40,11 +49,11 @@ class GMapObjectNavAgent(Seq2SeqAgent):
         }
 
     def _action_variable(self, obs):
-        ''' Gets the maximum number of actions for all samples in this batch, that is,
-        the number of adjacent viewpoints that have the most of all sample viewpoints.'''
         max_num_a = -1
         for i, ob in enumerate(obs):
             max_num_a = max(max_num_a, len(ob['candidate']))
+            # print('max_num_a:', max_num_a)
+
         is_valid = np.zeros((len(obs), max_num_a), np.float32)
         for i, ob in enumerate(obs):
             adj_loc_list = ob['candidate']
@@ -53,7 +62,6 @@ class GMapObjectNavAgent(Seq2SeqAgent):
         return Variable(torch.from_numpy(is_valid), requires_grad=False).cuda()
 
     def compute_label_for_point(self, label_set):
-        '''Get the set of all nonduplicate object labels for this viewpoint.'''
         new_set = []
         for i, list_ in enumerate(label_set):
             new_list = set()
@@ -66,7 +74,6 @@ class GMapObjectNavAgent(Seq2SeqAgent):
         return try_cuda(new_set)
 
     def compute_label_for_action(self, obs):
-        '''Gets the set of object labels that each navigable view contains to predict the room type for that view.'''
         all_list = []
         max_num_a = 0
         for i, ob in enumerate(obs):
@@ -83,22 +90,6 @@ class GMapObjectNavAgent(Seq2SeqAgent):
         all_list = torch.nn.utils.rnn.pad_sequence(all_list, batch_first=True, padding_value=0)
         return try_cuda(all_list)
 
-    def get_room_type_for_view(self, obs):
-        all_list = torch.LongTensor([])
-        max_num_a = 0
-        for i, ob in enumerate(obs):
-            max_num_a = max(max_num_a, len(ob['candidate']))
-        for ob in obs:
-            list_view = torch.LongTensor([])
-            for adj_loc in ob['candidate']:
-                nextViewpointId = adj_loc['viewpointId']
-                room_type = torch.LongTensor([self.env.room_label[ob['scan']][nextViewpointId]])  # int——>tensor
-                list_view = torch.cat([list_view, room_type], 0)
-            while len(list_view) < max_num_a:
-                list_view = torch.cat([list_view, torch.tensor([27])], 0)  # fill
-            all_list = torch.cat([all_list, list_view], 0)
-        return try_cuda(all_list)
-
     def get_room_type_for_cut(self, obs):
         current_vpids = []
         for ob in obs:
@@ -109,8 +100,24 @@ class GMapObjectNavAgent(Seq2SeqAgent):
             room_list = torch.cat([room_list, room_type], 0)
         return try_cuda(room_list)
 
+    def get_room_type_for_view(self, obs):
+        all_list = torch.LongTensor([])
+        # print(all_list.device) #cpu
+        max_num_a = 0
+        for i, ob in enumerate(obs):
+            max_num_a = max(max_num_a, len(ob['candidate']))
+        for ob in obs:
+            list_view = torch.LongTensor([])
+            for adj_loc in ob['candidate']:
+                nextViewpointId = adj_loc['viewpointId']
+                room_type = torch.LongTensor([self.env.room_label[ob['scan']][nextViewpointId]])  # int——>tensor
+                list_view = torch.cat([list_view, room_type], 0)
+            while len(list_view) < max_num_a:
+                list_view = torch.cat([list_view, torch.tensor([30])], 0)  # 填充
+            all_list = torch.cat([all_list, list_view], 0)
+        return try_cuda(all_list)
+
     def get_room_type_for_gmap_node(self, obs, cand_vips):
-        " Gets the region types of all navigable nodes on the navigation topology "
         all_list = torch.LongTensor([])
         max_num_a = 0
         for i, cand_vip in enumerate(cand_vips):
@@ -122,11 +129,12 @@ class GMapObjectNavAgent(Seq2SeqAgent):
                 room_type = torch.LongTensor([self.env.room_label[ob['scan']][nextViewpointId]])  # int——>tensor
                 list_view = torch.cat([list_view, room_type], 0)
             while len(list_view) < max_num_a:
-                list_view = torch.cat([list_view, torch.tensor([27])], 0)  # fill
+                list_view = torch.cat([list_view, torch.tensor([30])], 0)  # 填充
             all_list = torch.cat([all_list, list_view], 0)
         return try_cuda(all_list)
 
     def _panorama_feature_variable(self, obs):
+
         ''' Extract precomputed features into variable. '''
         batch_size = len(obs)
         batch_view_img_fts, batch_obj_img_fts, batch_loc_fts, batch_nav_types = [], [], [], []
@@ -169,7 +177,6 @@ class GMapObjectNavAgent(Seq2SeqAgent):
             batch_view_lens.append(len(view_img_fts))
             batch_obj_lens.append(len(ob['obj_img_fts']))
             batch_end_room_type.append((ob['end_room_type']))
-
         # pad features to max_len
         batch_view_img_fts = pad_tensors(batch_view_img_fts).cuda()
         batch_obj_img_fts = pad_tensors(batch_obj_img_fts).cuda()
@@ -268,9 +275,11 @@ class GMapObjectNavAgent(Seq2SeqAgent):
         batch_size = len(obs)
 
         # add [stop] token
+        # print("pano_embeds:", pano_embeds, pano_embeds.shape)
         vp_img_embeds = torch.cat(
             [torch.zeros_like(pano_embeds[:, :1]), pano_embeds], 1
         )
+        # print("vp_img_embeds:", vp_img_embeds, vp_img_embeds.shape)
         batch_vp_pos_fts = []
         for i, gmap in enumerate(gmaps):
             cur_cand_pos_fts = gmap.get_pos_fts(
@@ -288,6 +297,7 @@ class GMapObjectNavAgent(Seq2SeqAgent):
             batch_vp_pos_fts.append(torch.from_numpy(vp_pos_fts))
 
         batch_vp_pos_fts = pad_tensors(batch_vp_pos_fts).cuda()
+
         vp_nav_masks = torch.cat([torch.ones(batch_size, 1).bool().cuda(), nav_types == 1], 1)
         vp_obj_masks = torch.cat([torch.zeros(batch_size, 1).bool().cuda(), nav_types == 2], 1)
         is_valid = self._action_variable(obs)
@@ -303,6 +313,7 @@ class GMapObjectNavAgent(Seq2SeqAgent):
             'end_room_type': end_room_type
         }
 
+    # TODO 缩减改进
     def _teacher_action(self, obs, vpids, ended, visited_masks=None):
         """
         Extract teacher actions into variable.
@@ -381,7 +392,6 @@ class GMapObjectNavAgent(Seq2SeqAgent):
                 self.scanvp_cands[scanvp].setdefault(cand['viewpointId'], {})
                 self.scanvp_cands[scanvp][cand['viewpointId']] = cand['pointId']
 
-    # @profile
     def rollout(self, train_ml=None, train_rl=False, reset=True):
         if reset:  # Reset env
             obs = self.env.reset()
@@ -423,6 +433,7 @@ class GMapObjectNavAgent(Seq2SeqAgent):
                     gmap.node_step_ids[obs[i]['viewpoint']] = t + 1
 
             # graph representation
+            # print('obs:', obs, len(obs))
             pano_inputs = self._panorama_feature_variable(obs)
             pano_embeds, pano_masks, conn = self.vln_bert('panorama', pano_inputs)
             avg_pano_embeds = torch.sum(pano_embeds * pano_masks.unsqueeze(2), 1) / \
@@ -443,7 +454,8 @@ class GMapObjectNavAgent(Seq2SeqAgent):
                 self._nav_vp_variable(
                     obs, gmaps, pano_embeds, conn, pano_inputs['cand_vpids'],
                     pano_inputs['view_lens'], pano_inputs['obj_lens'],
-                    pano_inputs['nav_types'], pano_inputs['end_room_type']
+                    pano_inputs['nav_types'], pano_inputs['end_room_type'],
+
                 )
             )
             nav_inputs.update({
@@ -466,7 +478,7 @@ class GMapObjectNavAgent(Seq2SeqAgent):
                 final_nav_logits = nav_outs['all_fused_logits']
                 nav_vpids = nav_inputs['gmap_vpids']
 
-            nav_probs = torch.softmax(final_nav_logits, 1)
+            sample_nav_probs = torch.softmax(nav_logits, 1)
             obj_logits = nav_outs['obj_logits']
 
             # update graph
@@ -477,7 +489,7 @@ class GMapObjectNavAgent(Seq2SeqAgent):
                     i_objids = obs[i]['obj_ids']
                     i_obj_logits = obj_logits[i, pano_inputs['view_lens'][i] + 1:]
                     gmap.node_stop_scores[i_vp] = {
-                        'stop': nav_probs[i, 0].data.item(),
+                        'stop': sample_nav_probs[i, 0].data.item(),
                         'og': i_objids[torch.argmax(i_obj_logits)] if len(i_objids) > 0 else None,
                         'og_details': {'objids': i_objids, 'logits': i_obj_logits[:len(i_objids)]},
                     }
@@ -506,12 +518,12 @@ class GMapObjectNavAgent(Seq2SeqAgent):
                 _, a_t = final_nav_logits.max(1)  # student forcing - argmax
                 a_t = a_t.detach()
             elif self.feedback == 'sample':
-                c = torch.distributions.Categorical(nav_probs)
+                c = torch.distributions.Categorical(sample_nav_probs)
                 self.logs['entropy'].append(c.entropy().sum().item())  # For log
                 entropys.append(c.entropy())  # For optimization
                 a_t = c.sample().detach()
             elif self.feedback == 'expl_sample':
-                _, a_t = nav_probs.max(1)
+                _, a_t = sample_nav_probs.max(1)
                 rand_explores = np.random.rand(batch_size, ) > self.args.expl_max_ratio  # hyper-param
                 if self.args.fusion == 'local':
                     cpu_nav_masks = nav_inputs['vp_nav_masks'].data.cpu().numpy()
@@ -540,7 +552,7 @@ class GMapObjectNavAgent(Seq2SeqAgent):
                 else:
                     cpu_a_t.append(nav_vpids[i][a_t[i]])
 
-            # Make action and get the new state
+                    # Make action and get the new state
             self.make_equiv_action(cpu_a_t, gmaps, obs, traj)
             for i in range(batch_size):
                 if (not ended[i]) and just_ended[i]:
@@ -570,8 +582,8 @@ class GMapObjectNavAgent(Seq2SeqAgent):
             ended[:] = np.logical_or(ended, np.array([x is None for x in cpu_a_t]))
 
             # Early exit if all ended
-            # if ended.all():
-            #     break
+            if ended.all():
+                break
 
         if train_ml is not None:
             ml_loss = ml_loss * train_ml / batch_size
