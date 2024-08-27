@@ -671,25 +671,6 @@ class ClsPrediction(nn.Module):
         return self.net(x)
 
 
-
-
-class AttentionPrediction(nn.Module):
-    def __init__(self, hidden_size, input_size=None):
-        super().__init__()
-        if input_size is None:
-            input_size = hidden_size
-        self.query = nn.Linear(input_size, 1)
-        self.key = nn.Linear(input_size, 1)
-
-    def forward(self, x):
-        query = self.query(x)
-        key = self.key(x)
-        scores = query * key
-        attention_weights = F.softmax(scores, dim=0)
-        output = attention_weights.mean()
-        return output
-
-
 class RoomClassifier(nn.Module):
     def __init__(self, hidden_size, input_size=None):
         super().__init__()
@@ -718,8 +699,6 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         self.global_sap_head = ClsPrediction(self.config.hidden_size)
         self.local_sap_head = ClsPrediction(self.config.hidden_size)
 
-        self.conn_scale_liner = AttentionPrediction(self.config.hidden_size, input_size=self.config.hidden_size * 2)
-        self.activ_thold_liner = AttentionPrediction(self.config.hidden_size)
         if config.glocal_fuse:
             self.sap_fuse_linear = ClsPrediction(self.config.hidden_size, input_size=self.config.hidden_size * 2)
         else:
@@ -802,13 +781,8 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
             connectivity_reason, three_second_room_index = torch.max(connectivity_reason_mid, 1)
             connectivity_reason = connectivity_reason.reshape(batch_size, -1)
             connectivity = torch.where(threshold.unsqueeze(1) < 0.8, connectivity_reason, connectivity)
+        connectivity[connectivity >= 0.9] *= 2
         return connectivity
-
-    def activate_function(self, connectivity, threshold, scaling):
-        connectivity = torch.where(connectivity == 1, connectivity + 0.5, connectivity)
-        conn = torch.where(connectivity < threshold, (scaling / threshold) * connectivity - scaling,
-                           (scaling / (1 - threshold)) * connectivity + scaling * threshold / (threshold - 1))
-        return conn
 
     def pad_tensors(self, tensors, lens):
         if tensors.shape[2] > self.config.hidden_size:
@@ -903,10 +877,6 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
 
         vp_embeds = vp_img_embeds + self.local_encoder.vp_pos_embeddings(vp_pos_fts)
         vp_embeds = self.local_encoder.encoder(txt_embeds, txt_masks, vp_embeds, vp_masks)
-        activate_threshold = torch.abs(self.activ_thold_liner(torch.ones_like(vp_embeds[:, 0])))
-        activate_threshold[activate_threshold < 0.7] = 0.7
-        conn_scaling_weights = torch.abs(self.conn_scale_liner(torch.cat([gmap_embeds[:, 0], vp_embeds[:, 0]], 1)))
-        conn_scaling_weights[conn_scaling_weights < 1.35] = 1.35
         if self.sap_fuse_linear is None:
             fuse_weights = 0.5
         else:
@@ -923,15 +893,15 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         end_room_type_oh.scatter_(1, end_room_type[:, None], 1)
         global_conn = self.get_reasoning_conn(view_labels_oh, end_room_type_oh, batch_size, nv_node_room_type.shape[1],
                                               gmap_visited_masks[:, 1:])
-        global_conn = self.activate_function(global_conn, activate_threshold, conn_scaling_weights)
         global_conn = torch.cat([torch.zeros(batch_size, 1).cuda(), global_conn], 1)
+        global_conn.masked_fill_(gmap_visited_masks, 0)
         global_conn.masked_fill_(gmap_masks.logical_not(), 0)
         fused_global_logits = global_logits + global_conn
 
         local_logits = self.local_sap_head(vp_embeds).squeeze(2) * (1 - fuse_weights)
         local_logits.masked_fill_(vp_nav_masks.logical_not(), -float('inf'))
-        local_conn = self.activate_function(local_conn, activate_threshold, conn_scaling_weights)
         local_conn.masked_fill_(is_valid == 0, 0)
+
         fused_local_logits = torch.clone(local_logits)
         fused_local_logits[:, 1:local_conn.shape[1] + 1] += local_conn
         # residual fusion
@@ -960,7 +930,7 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         for i, stop_singal in enumerate(stop_singals):
             # Stop according to visual logits.
             if stop_singal:
-                all_fused_logits[i, 0] += 99
+                all_fused_logits[i, 0] += float('inf')
 
         # object grounding logits
         if vp_obj_masks is not None:
